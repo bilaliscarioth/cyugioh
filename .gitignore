@@ -1,0 +1,3 @@
+*.core
+**/*.core
+compile_commands.json
