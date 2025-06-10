@@ -124,8 +124,11 @@ http_request(const char* restrict method,
 	char* head_buffer =  kv_into_str(headers->lh_first);
 	if (head_buffer == NULL)
 		goto free_head;
-	
-	len += (size_t)snprintf(req+len, 8192-len, "\r\n\r\n");
+
+	printf("%s \n", head_buffer);
+
+	len += (size_t)snprintf(req+len, 8192-len, "%s", head_buffer);
+		
     if (is_https && https(v, body, req, len) != 0)
 		goto free_head_buffer;
     else if (!is_https && http(v, body, req, len) != 0)
