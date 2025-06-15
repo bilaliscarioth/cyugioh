@@ -31,47 +31,48 @@ https(char** format, struct http_body* body, char* req, size_t len)
         return 1;
 
     if ((size_t) tls_write(body->tls, req, len) != len)
-    {
-        goto https_close_connection;
-    }
-
-
-    body->response = calloc(1, sizeof(struct http_response));
-    if (body->response == NULL)
         goto https_close_connection;
 
     ssize_t d         = 0;
     char    tmp[1369] = { 0 };
-
+    char* rep_buffer = NULL;
+	size_t rep_buffer_len = 0;
+	
+	body->response = calloc(1, sizeof(struct http_response));
+    if (body->response == NULL)
+        goto https_close_connection;
 
     while (0 < (d = tls_read(body->tls, tmp, sizeof(tmp))))
     {
         if (tmp[0] == '0')
             break;
-        body->response->len_content += d;
-        char* tmp_buf = realloc(body->response->content,
-                                body->response->len_content * sizeof(char));
+		
+        rep_buffer_len += d;
+        char* tmp_buf = realloc(rep_buffer, rep_buffer_len * sizeof(char));
+		
         if (tmp_buf == NULL)
             goto https_free_content_response;
 
-        body->response->content = tmp_buf;
+        rep_buffer = tmp_buf;
 
-        memcpy(body->response->content + body->response->len_content - d,
+        memcpy(rep_buffer + rep_buffer_len - d,
                tmp,
                (size_t) d);
-		printf("%lu \n", d);
-				
         memset(tmp, 0, sizeof(tmp) - 1);
-		printf("%lu \n", d);
     }
 
-	printf("%s \n", body->response->content);
+	if ( parse_response(rep_buffer, body->response) != 0)
+        goto https_free_content_response;
+
+    free(rep_buffer);
+
     tls_close(body->tls);
     return 0;
-
+	// Unreachable
+	//Error handling;
 https_free_content_response:
-    free(body->response->content);
-    free(body->response);
+    free(rep_buffer);
+	free(body->response);
 https_close_connection:
     tls_close(body->tls);
     return 1;
@@ -82,20 +83,24 @@ http_request(const char* restrict method,
              const char* restrict link,
              struct http_body* body)
 {
+	char*  head_buffer = NULL;
     bool   is_https = true;
-    char** v        = parse_link((char*) link, &is_https);
-    if (v == NULL)
-        return -1;
-
-	LIST_HEAD(,http_kv) *headers = calloc(1, sizeof(LIST_HEAD(, http_kv)));
-	if (headers == NULL)
-		goto free_v;
-
+    char** v           = parse_link((char*) link, &is_https);
+    LIST_HEAD(, http_kv) headers;
+    LIST_INIT(&headers);
 	
-	LIST_INSERT_HEAD(headers, create_pair("Host", v[1]), link);
+	// If we can't parse links.
+    if (v == NULL)
+        return 1;
+	
+    LIST_INSERT_HEAD(&headers, create_pair("Host", v[1]), link);
+	
+    if (LIST_EMPTY(&headers))
+		goto free_head;
 
+	// Add others headers.
     if (body->header != NULL)
-		LIST_INSERT_BEFORE(headers->lh_first, body->header->lh_first, link);
+		LIST_INSERT_AFTER(LIST_FIRST(&headers), body->header->lh_first, link);
 	
 	
     char http_version[16] = { 0 };
@@ -118,15 +123,26 @@ http_request(const char* restrict method,
     }
 
     size_t len = 8192;
-    char   req[8192];
+    char   req[8192] = {0};
     len = (size_t) snprintf(req, 8192, "%s %s %s\r\n", method, v[2], http_version);
 
-	char* head_buffer =  kv_into_str(headers->lh_first);
+	head_buffer =  kv_into_str(LIST_FIRST(&headers));
 	if (head_buffer == NULL)
 		goto free_head;
 
-	printf("%s \n", head_buffer);
-
+	// free list.
+	while ( !LIST_EMPTY(&headers))
+    {
+        struct http_kv* tmp = LIST_FIRST(&headers);
+		if (LIST_NEXT(tmp, link) != NULL)
+            LIST_REMOVE(tmp, link);
+		else
+			headers.lh_first = NULL;
+        free(tmp->key);
+		free(tmp->value);
+		free(tmp);
+	}
+	
 	len += (size_t)snprintf(req+len, 8192-len, "%s", head_buffer);
 		
     if (is_https && https(v, body, req, len) != 0)
@@ -134,17 +150,30 @@ http_request(const char* restrict method,
     else if (!is_https && http(v, body, req, len) != 0)
 		goto free_head_buffer;
 
+	//  free what we used
+    free(head_buffer);
+	head_buffer = NULL;
+    for (uint8_t i = 0; i < 4; i++)
+        free(v[i]);
+    free(v);
+	v = NULL;
     return 0;
-free_head_buffer:
-	free(head_buffer);
+	// Unreachable
+	//Error handling;
 free_head:
-	for (struct http_kv *kv = LIST_FIRST(headers); kv != NULL;)
-	{
-		struct http_kv* tmp = kv;
-		kv = LIST_NEXT(kv, link);
+	
+	// free list.
+	while ( !LIST_EMPTY(&headers))
+    {
+        struct http_kv* tmp = LIST_FIRST(&headers);
+		if (LIST_NEXT(tmp, link) != NULL)
+			LIST_REMOVE(tmp, link);
+        free(tmp->key);
+		free(tmp->value);
 		free(tmp);
 	}
-	free(headers);
+free_head_buffer:
+	free(head_buffer);
 free_v:
     for (uint8_t i = 0; i < 4; i++)
         free(v[i]);

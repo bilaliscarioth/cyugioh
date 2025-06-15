@@ -7,7 +7,9 @@
 #ifndef __HTTPS_
 #define __HTTPS_
 
+
 struct http_body;
+struct http_response;
 
 struct http_kv* create_pair(char* restrict, char* restrict);
 
@@ -15,7 +17,7 @@ char* kv_into_str(struct http_kv*);
 
 char** parse_link(char* restrict, bool*);
 
-struct http_kv* parse_header(char* buf);
+int parse_response(char*, struct http_response*);
 
 int http_request(const char* restrict, const char* restrict, struct http_body*);
 
@@ -26,8 +28,18 @@ struct http_kv
     char* value;
 };
 
+enum http_version
+{
+	HTTP1,
+	HTTP1_1,
+	HTTP2,
+	HTTP3
+};
+
+
 struct http_response
 {
+	enum http_version http_version;
     uint8_t status;
     char    status_text[64];
     LIST_HEAD(,http_kv) *headers;
@@ -37,16 +49,11 @@ struct http_response
 
 struct http_body
 {
+	
+	enum http_version http_version;
     void*  payload;
     size_t len_payload;
 
-    enum
-    {
-        HTTP1,
-        HTTP1_1,
-        HTTP2,
-        HTTP3
-    } http_version;
 
     struct http_response* response;
     //
