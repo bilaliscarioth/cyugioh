@@ -15,9 +15,9 @@
 
 
 static int
-http(char** format, struct http_body* body, char* req, size_t len)
+http(const struct http_link *link, struct http_body* body, char* req, size_t len)
 {
-    (void) format;
+    (void) link;
     (void) body;
     (void) req;
     (void) len;
@@ -25,9 +25,9 @@ http(char** format, struct http_body* body, char* req, size_t len)
 }
 
 static int
-https(char** format, struct http_body* body, char* req, size_t len)
+https(const struct http_link *link, struct http_body* body, char* req, size_t len)
 {
-    if (tls_connect(body->tls, format[1], format[0]) != 0)
+    if (tls_connect(body->tls, link->host, link->port) != 0)
         return 1;
 
     if ((size_t) tls_write(body->tls, req, len) != len)
@@ -83,18 +83,15 @@ http_request(const char* restrict method,
              const char* restrict link,
              struct http_body* body)
 {
-	char*  head_buffer = NULL;
-    bool   is_https = true;
-    char** v           = parse_link((char*) link, &is_https);
-    LIST_HEAD(, http_kv) headers;
-    LIST_INIT(&headers);
-	
-	// If we can't parse links.
-    if (v == NULL)
+    struct http_link parsed_link;
+    if (!parse_link((char*) link, &parsed_link))
         return 1;
 	
-    LIST_INSERT_HEAD(&headers, create_pair("Host", v[1]), link);
-	
+	char*  head_buffer = NULL;
+	LIST_HEAD(, http_kv) headers;
+    LIST_INIT(&headers);
+
+    LIST_INSERT_HEAD(&headers, create_pair("Host", parsed_link.host), link);
     if (LIST_EMPTY(&headers))
 		goto free_head;
 
@@ -102,81 +99,54 @@ http_request(const char* restrict method,
     if (body->header != NULL)
 		LIST_INSERT_AFTER(LIST_FIRST(&headers), body->header->lh_first, link);
 	
-	
     char http_version[16] = { 0 };
 	// No need of strlcpy nor strncpy because
 	// 16 chars is sufficient to contain each cases.
     switch (body->http_version)
     {
-        case HTTP1:
-            strcpy(http_version, "HTTP/1");
-            break;
-        case HTTP1_1:
-            strcpy(http_version, "HTTP/1.1");
-            break;
-        case HTTP2:
-            strcpy(http_version, "HTTP/2");
-            break;
-        case HTTP3:
-            strcpy(http_version, "HTTP/3");
-            break;
+	case HTTP1:
+		strcpy(http_version, "HTTP/1");
+		break;
+	case HTTP1_1:
+		strcpy(http_version, "HTTP/1.1");
+		break;
+	case HTTP2:
+		strcpy(http_version, "HTTP/2");
+		break;
+	case HTTP3:
+		strcpy(http_version, "HTTP/3");
+		break;
     }
 
     size_t len = 8192;
     char   req[8192] = {0};
-    len = (size_t) snprintf(req, 8192, "%s %s %s\r\n", method, v[2], http_version);
+    len = (size_t) snprintf(req, 8192, "%s %s %s\r\n", method, parsed_link.entrypoint, http_version);
 
 	head_buffer =  kv_into_str(LIST_FIRST(&headers));
 	if (head_buffer == NULL)
 		goto free_head;
 
 	// free list.
-	while ( !LIST_EMPTY(&headers))
-    {
-        struct http_kv* tmp = LIST_FIRST(&headers);
-		if (LIST_NEXT(tmp, link) != NULL)
-            LIST_REMOVE(tmp, link);
-		else
-			headers.lh_first = NULL;
-        free(tmp->key);
-		free(tmp->value);
-		free(tmp);
-	}
-	
+	FREE_HTTP_HEADERS((&headers));
+
 	len += (size_t)snprintf(req+len, 8192-len, "%s", head_buffer);
 		
-    if (is_https && https(v, body, req, len) != 0)
+    if (parsed_link.is_https && https(&parsed_link, body, req, len) != 0)
 		goto free_head_buffer;
-    else if (!is_https && http(v, body, req, len) != 0)
+    else if (!parsed_link.is_https && http(&parsed_link, body, req, len) != 0)
 		goto free_head_buffer;
 
 	//  free what we used
     free(head_buffer);
 	head_buffer = NULL;
-    for (uint8_t i = 0; i < 4; i++)
-        free(v[i]);
-    free(v);
-	v = NULL;
+
     return 0;
 	// Unreachable
 	//Error handling;
 free_head:
-	
 	// free list.
-	while ( !LIST_EMPTY(&headers))
-    {
-        struct http_kv* tmp = LIST_FIRST(&headers);
-		if (LIST_NEXT(tmp, link) != NULL)
-			LIST_REMOVE(tmp, link);
-        free(tmp->key);
-		free(tmp->value);
-		free(tmp);
-	}
+	FREE_HTTP_HEADERS((&headers));
 free_head_buffer:
 	free(head_buffer);
-free_v:
-    for (uint8_t i = 0; i < 4; i++)
-        free(v[i]);
-    free(v);
     return 1;
 }

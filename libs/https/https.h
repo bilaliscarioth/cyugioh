@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <tls.h>
 
 #ifndef __HTTPS_
@@ -10,16 +11,41 @@
 
 struct http_body;
 struct http_response;
+struct http_link;
+struct http_kv;
 
-struct http_kv* create_pair(char* restrict, char* restrict);
+#define FREE_HTTP_HEADERS(headers)						\
+    do													\
+    {													\
+		while (!LIST_EMPTY(headers))					\
+		{												\
+			struct http_kv* tmp = LIST_FIRST(headers);	\
+			if (LIST_NEXT(tmp, link) != NULL)			\
+				LIST_REMOVE(tmp, link);					\
+			else										\
+				headers->lh_first = NULL;				\
+			printf("%s %s \n", tmp->key, tmp->value);	\
+			free(tmp->key);								\
+			free(tmp->value);							\
+			free(tmp);									\
+		}												\
+	} while(0)
 
-char* kv_into_str(struct http_kv*);
+struct http_kv*
+create_pair(char* restrict, char* restrict);
 
-char** parse_link(char* restrict, bool*);
+char*
+kv_into_str(struct http_kv*);
 
-int parse_response(char*, struct http_response*);
+bool
+parse_link(char* restrict, struct http_link*);
 
-int http_request(const char* restrict, const char* restrict, struct http_body*);
+int
+parse_response(char*, struct http_response*);
+
+int
+http_request(const char* restrict, const char* restrict, struct http_body*);
+
 
 struct http_kv
 {
@@ -34,6 +60,14 @@ enum http_version
 	HTTP1_1,
 	HTTP2,
 	HTTP3
+};
+
+struct http_link
+{
+    bool is_https;
+    char port[8];
+	char entrypoint[8192];
+    char host[1024];
 };
 
 

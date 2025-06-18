@@ -1,4 +1,5 @@
-#include <stdint.h>
+#include "https.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,79 +48,59 @@ parse_domain_name(char* cursor, char** port)
 	return end_hostname;
 }
 
-char**
-parse_link(char *restrict link, bool* is_https) {
-	/*
-	  tmp[0] = protocol/port
-	  tmp[1] = hostname 
-	  tmp[2] = entrypoint
-	  tmp[3] = NULL Terminator.
-	 */
-	char** tmp = (char**) calloc(4, sizeof(char*));
+bool
+parse_link(char* restrict link, struct http_link* format)
+{
+    if (format == NULL || link == NULL)
+		return false;
 	
-	if (tmp == NULL)
-		err(1, "calloc:");
-
-	char* cursor = parse_protocol(link, is_https);
+    memset(format, 0, sizeof(struct http_link));
+    char* cursor = parse_protocol(link, &(format->is_https));
 	if (cursor == NULL)
-		goto error1;
+		return false;
 
 	if (*cursor == '\0')
 	{
 		puts("link is incomplete,\nexample: http(s)://domain.name/entrypoint");
-		goto error2;
+		return false;
 	}
 
-	tmp[0] = (char*) calloc(10, sizeof(char));
-	
-	if ( tmp[0] == NULL)
-		goto error1;
-	
-	tmp[1] = (char*) calloc(8192, sizeof(char));
-	if (tmp[1] == NULL)
-		goto error2;
-	
-
 	char* port = NULL;
-	char* end_hostname = parse_domain_name(cursor, &port);
-
+    char* end_hostname = parse_domain_name(cursor, &port);
+	
 	if (port != NULL)
-	{
-		if ( end_hostname-port < 9)
-			memcpy(tmp[0], port, (size_t)(end_hostname-port));
+    {
+		memcpy(format->host, cursor, (size_t)(port-cursor));
+		if ( end_hostname-port < 7)
+			memcpy(format->port, port, (size_t)(end_hostname-port));
 		else
 		{
 			printf("out of bound for port, exceed 9 digits.\n");
-			goto error3;
+			return false;
 		}
 	}
 	else
-	{
-		if (is_https)
-			strlcpy(tmp[0], "443", 10);
+    {
+		memcpy(format->host, cursor, (size_t)(end_hostname-cursor));
+		if (format->is_https)
+			strlcpy(format->port, "443", 10);
 		else
-			strlcpy(tmp[0], "80", 10);
+			strlcpy(format->port, "80", 10);
 	}
+
 	
-	memcpy(tmp[1], cursor, (size_t)(end_hostname-cursor));
+
 	cursor = end_hostname;
-	
-	if (*cursor == '\0')
-		return tmp;
 
-	tmp[2] = (char*) calloc(8192, sizeof(char));
-	if (tmp[2] == NULL)
-		goto error3;
+    if (*cursor == '\0')
+    {
+		strcpy(format->entrypoint, "/");
+        return true;
+	}
 
-	
-	memcpy(tmp[2], cursor, (size_t) strlen(cursor));
-	return tmp;
-	
-error3:
-	free(tmp[1]);
-error2:
-	free(tmp[0]);
-error1:
-	free(tmp);
-	return NULL;
+	memcpy(format->entrypoint, cursor, (size_t) strlen(cursor));
+	return true;
+error:
+	memset(format, 0, sizeof(struct http_link));
+	return false;
 }

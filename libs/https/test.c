@@ -1,6 +1,7 @@
 #include "https.h"
 
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <tls.h>
@@ -9,25 +10,20 @@
 int
 main()
 {
-    bool   is_https;
-    char** v = parse_link(
-        "https://db.ygoprodeck.com/api/v7/cardinfo.php?name=Slifer%20The%20Sky%20Dragon",
-        &is_https);
-
-    if (v == NULL)
+    bool is_https;
+	struct http_link link;
+    if (! parse_link(
+			"https://db.ygoprodeck.com/api/v7/cardinfo.php?name=Slifer%20The%20Sky%20Dragon",
+			&link))
         err(1, "parse_link:");
 
-    assert(strncmp(v[0], "443", 3) == 0);
-    assert(strncmp(v[1], "db.ygoprodeck.com", 17) == 0);
-    assert(strncmp(v[2],
+    assert(strncmp(link.port, "443", 3) == 0);
+    assert(strncmp(link.host, "db.ygoprodeck.com", 17) == 0);
+    assert(strncmp(link.entrypoint,
                    "/api/v7/cardinfo.php?name=Slifer%20The%20Sky%20Dragon",
                    53)
            == 0);
-
-	for (int i = 0; i < 4; i++)
-		free(v[i]);
-	free(v);
-
+	
     if (tls_init() != 0)
         err(1, "tls_init:");
 
@@ -54,12 +50,15 @@ main()
         return 1;
 	}
 
-	tls_free(tls);
+    tls_free(tls);
+	t.tls = NULL;
 
 	if ( t.response != NULL)
 	{
 		printf("%s \n", t.response->content);
-		free(t.response->content);
+        free(t.response->content);
+        FREE_HTTP_HEADERS(t.response->headers);
+        free(t.response->headers);
 	}
 
 	free(t.response);

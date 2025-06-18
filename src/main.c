@@ -3,10 +3,7 @@
 int
 main(int argc, char** argv)
 {
-	if ( argc == 0)
-        return 1;
-
-
+	(void)argc;
 	(void)argv;
 	return 0;
 }
